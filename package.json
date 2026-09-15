@@ -18,10 +18,9 @@
   "author": "",
   "license": "MIT",
   "devDependencies": {
-    "electron": "^28.0.0",
-    "electron-builder": "^24.9.0"
+    "electron": "^44.0.0",
+    "electron-builder": "^26.15.3"
   },
-  "dependencies": {},
   "build": {
     "appId": "com.dailyupdate.windows",
     "productName": "Daily Update",
@@ -39,6 +38,6 @@
     "publish": null
   },
   "allowScripts": {
-    "electron@28.3.3": true
+    "electron@44.0.0": true
   }
 }

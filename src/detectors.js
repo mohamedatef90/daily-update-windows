@@ -309,6 +309,8 @@ async function scanDetectors(wingetPackages = [], rootFolder = '', applicationFo
       wingetSource: detector.wingetSource || null,
       path: result.installPath || result.commandPath || result.storePackagePath || null,
       installed: result.installed,
+      locallyDetected: Boolean(result.installPath || result.commandPath || result.storePackagePath),
+      wingetInstalled: Boolean(result.wingetMatch),
       version,
       status,
       latestVersion: null,

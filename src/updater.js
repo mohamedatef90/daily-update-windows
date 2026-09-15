@@ -199,7 +199,7 @@ async function listWingetPackages() {
 /**
  * Check if a winget package has updates
  * @param {string} packageId - Package ID
- * @returns {Promise<{hasUpdate: boolean, latestVersion: string|null}>}
+ * @returns {Promise<{installed: boolean, hasUpdate: boolean, latestVersion: string|null}>}
  */
 async function checkWingetUpdate(packageId) {
   // Prefer listing upgrades for this exact id
@@ -214,11 +214,17 @@ async function checkWingetUpdate(packageId) {
   const output = `${result.stdout}\n${result.stderr}`;
 
   if (
-    /No applicable update found/i.test(output) ||
     /No installed package found/i.test(output) ||
+    /No package found matching input criteria/i.test(output)
+  ) {
+    return { installed: false, hasUpdate: false, latestVersion: null };
+  }
+
+  if (
+    /No applicable update found/i.test(output) ||
     /No newer package versions are available/i.test(output)
   ) {
-    return { hasUpdate: false, latestVersion: null };
+    return { installed: true, hasUpdate: false, latestVersion: null };
   }
 
   // winget upgrade --id prints a table when an update exists
@@ -246,6 +252,7 @@ async function checkWingetUpdate(packageId) {
     (Boolean(latestVersion) || /Available/i.test(output) || lines.length > 2);
 
   return {
+    installed: true,
     hasUpdate,
     latestVersion: latestVersion || (hasUpdate ? 'newer' : null)
   };

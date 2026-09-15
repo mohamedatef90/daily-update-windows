@@ -15,6 +15,7 @@ const viewHistory = document.getElementById('view-history');
 const setupModal = document.getElementById('setup-modal');
 
 const btnAddItem = document.getElementById('btn-add-item');
+const btnRefreshApps = document.getElementById('btn-refresh-apps');
 const btnCheckUpdates = document.getElementById('btn-check-updates');
 const btnUpdateSelected = document.getElementById('btn-update-selected');
 const btnSelectAllUpdates = document.getElementById('btn-select-all-updates');
@@ -26,6 +27,7 @@ const searchInput = document.getElementById('search-input');
 const checkboxSelectAll = document.getElementById('checkbox-select-all');
 const itemTableBody = document.getElementById('item-table-body');
 const itemsTitle = document.getElementById('items-title');
+const itemsSubtitle = document.getElementById('items-subtitle');
 const logPanel = document.getElementById('log-panel');
 const logContent = document.getElementById('log-content');
 const bottomStatus = document.getElementById('bottom-status');
@@ -89,19 +91,23 @@ async function init() {
     setupEventListeners();
     renderApplicationFolders();
 
-    setLoadingMessage('Scanning apps and repositories…');
-    await reloadAllConfigs(false);
-
     if (!settings.hasCompletedSetup) {
+      setLoadingMessage('Scanning apps and repositories…');
+      await reloadAllConfigs(false);
       hideLoadingScreen();
       setupModal.classList.remove('hidden');
       updateOnboardingPreview();
     } else {
+      allItems = [
+        ...(settings.detectors || []).map(d => ({ ...d, type: d.type || 'detector', selected: false })),
+        ...(settings.repositories || []).map(r => ({ ...r, type: 'repo', selected: false }))
+      ];
       renderCurrentView();
-      if (settings.autoCheckOnLaunch !== false) {
-        await handleCheckUpdates();
-      }
+      updateBadges();
       hideLoadingScreen();
+
+      // Let the window become interactive immediately, then refresh in the background.
+      setTimeout(() => refreshOnLaunch(), 0);
     }
 
     updateBadges();
@@ -111,10 +117,12 @@ async function init() {
   }
 }
 
-async function reloadAllConfigs(persist = true) {
+async function reloadAllConfigs(persist = true, showLoader = true) {
   const wasLoading = isLoadingVisible();
-  if (!wasLoading) showLoadingScreen('Scanning apps and repositories…');
-  else setLoadingMessage('Scanning apps and repositories…');
+  if (showLoader) {
+    if (!wasLoading) showLoadingScreen('Scanning apps and repositories…');
+    else setLoadingMessage('Scanning apps and repositories…');
+  }
 
   try {
     const rootFolder = settings.rootFolder || rootFolderInput.value || '';
@@ -146,7 +154,7 @@ async function reloadAllConfigs(persist = true) {
     }
     addLog(`Loaded ${allItems.length} items (${detectors.length} catalog, ${repos.length} repos)`);
   } finally {
-    if (!wasLoading) hideLoadingScreen();
+    if (showLoader && !wasLoading) hideLoadingScreen();
   }
 }
 
@@ -213,7 +221,8 @@ function setupEventListeners() {
     setupModal.classList.remove('hidden');
   });
 
-  btnCheckUpdates.addEventListener('click', handleCheckUpdates);
+  btnCheckUpdates.addEventListener('click', () => handleCheckUpdates());
+  btnRefreshApps.addEventListener('click', handleRefreshApps);
   btnUpdateSelected.addEventListener('click', handleUpdateSelected);
 
   // List controls
@@ -223,8 +232,11 @@ function setupEventListeners() {
   });
 
   btnSelectAllUpdates.addEventListener('click', () => {
-    allItems.forEach(item => {
-      if (item.status === 'update-available') {
+    getFilteredItems().forEach(item => {
+      if (
+        item.status === 'update-available' ||
+        (currentView === 'discover-apps' && item.status === 'not-installed' && item.wingetId)
+      ) {
         item.selected = true;
       }
     });
@@ -246,7 +258,7 @@ function setupEventListeners() {
 
   checkboxSelectAll.addEventListener('change', (e) => {
     const filtered = getFilteredItems();
-    filtered.forEach(item => item.selected = e.target.checked);
+    filtered.filter(isItemSelectable).forEach(item => item.selected = e.target.checked);
     renderItemList();
     updateSelectedButton();
   });
@@ -304,9 +316,16 @@ function handleNavigation(view, filter = null) {
   // Update nav active state
   navItems.forEach(nav => nav.classList.remove('active'));
   const activeNav = Array.from(navItems).find(nav =>
-    nav.dataset.view === view && nav.dataset.filter === filter
+    nav.dataset.view === view && (nav.dataset.filter || null) === filter
   );
   if (activeNav) activeNav.classList.add('active');
+
+  btnSelectAllUpdates.textContent = view === 'discover-apps'
+    ? 'Select All Apps'
+    : 'Select All Updates';
+  btnUpdateSelected.querySelector('.btn-label').textContent = view === 'discover-apps'
+    ? 'Install Selected'
+    : 'Update Selected';
 
   renderCurrentView();
 }
@@ -326,6 +345,7 @@ function renderCurrentView() {
     case 'all-items':
       viewItems.classList.remove('hidden');
       itemsTitle.textContent = 'All Items';
+      itemsSubtitle.textContent = 'Manage and update your installed software';
       renderItemList();
       break;
     case 'category':
@@ -337,11 +357,19 @@ function renderCurrentView() {
         runtime: 'Runtime/Library'
       };
       itemsTitle.textContent = categoryLabels[currentFilter] || 'Items';
+      itemsSubtitle.textContent = 'Manage and update your installed software';
       renderItemList();
       break;
     case 'updates-available':
       viewItems.classList.remove('hidden');
       itemsTitle.textContent = 'Updates Available';
+      itemsSubtitle.textContent = 'Updates ready for your installed software';
+      renderItemList();
+      break;
+    case 'discover-apps':
+      viewItems.classList.remove('hidden');
+      itemsTitle.textContent = 'Discover Apps';
+      itemsSubtitle.textContent = 'Apps from the catalog that are not installed on this device';
       renderItemList();
       break;
     case 'history':
@@ -353,10 +381,11 @@ function renderCurrentView() {
 
 // Dashboard
 function renderDashboard() {
-  const totalItems = allItems.length;
-  const installedCount = allItems.filter(i => i.status === 'up-to-date' || i.status === 'update-available').length;
+  const installedItems = allItems.filter(i => i.status !== 'not-installed' && i.installed !== false);
+  const totalItems = installedItems.length;
+  const installedCount = installedItems.length;
   const updatesCount = allItems.filter(i => i.status === 'update-available').length;
-  const reposCount = allItems.filter(i => i.category === 'repo').length;
+  const reposCount = installedItems.filter(i => i.category === 'repo').length;
 
   document.getElementById('stat-total').textContent = totalItems;
   document.getElementById('stat-installed').textContent = installedCount;
@@ -376,8 +405,8 @@ function renderDashboard() {
 
   Object.entries(categories).forEach(([key, { label, dot }]) => {
     const count = key === 'runtime'
-      ? allItems.filter(i => i.category === 'runtime' || i.category === 'library').length
-      : allItems.filter(i => i.category === key).length;
+      ? installedItems.filter(i => i.category === 'runtime' || i.category === 'library').length
+      : installedItems.filter(i => i.category === key).length;
     const row = document.createElement('div');
     row.className = 'category-row';
     row.innerHTML = `
@@ -396,6 +425,13 @@ function getFilteredItems() {
   let filtered = allItems;
 
   // Apply view filter
+  if (currentView === 'discover-apps') {
+    filtered = filtered.filter(item => item.status === 'not-installed' || item.installed === false);
+  } else {
+    // Keep catalog suggestions out of the normal update-management views.
+    filtered = filtered.filter(item => item.status !== 'not-installed' && item.installed !== false);
+  }
+
   if (currentView === 'category' && currentFilter) {
     if (currentFilter === 'runtime') {
       filtered = filtered.filter(item => item.category === 'runtime' || item.category === 'library');
@@ -433,16 +469,18 @@ function renderItemList() {
         </td>
       </tr>
     `;
+    updateSelectedButton();
     return;
   }
 
   itemTableBody.innerHTML = filtered.map((item) => `
     <tr>
       <td class="col-checkbox">
-        <input type="checkbox"
-          data-index="${allItems.indexOf(item)}"
-          ${item.selected ? 'checked' : ''}
-          ${item.status === 'checking' || item.status === 'updating' ? 'disabled' : ''}>
+        ${isItemSelectable(item) ? `
+          <input type="checkbox"
+            data-index="${allItems.indexOf(item)}"
+            ${item.selected ? 'checked' : ''}>
+        ` : ''}
       </td>
       <td class="col-name">
         <div class="item-name">${escapeHtml(item.name)}</div>
@@ -469,12 +507,17 @@ function renderItemList() {
     });
   });
 
-  updateBottomBar();
+  updateSelectedButton();
+}
+
+function isItemSelectable(item) {
+  if (item.status === 'update-available') return true;
+  return (item.status === 'not-installed' || item.installed === false) && Boolean(item.wingetId);
 }
 
 function renderStatusBadge(item) {
   const statusMap = {
-    'unchecked': { label: 'Unknown', class: 'status-unknown' },
+    'unchecked': { label: 'Checking…', class: 'status-checking' },
     'checking': { label: 'Checking…', class: 'status-checking' },
     'up-to-date': { label: 'Up to date', class: 'status-up-to-date' },
     'update-available': { label: 'Update available', class: 'status-update-available' },
@@ -547,16 +590,19 @@ function renderHistory() {
 
 // Badges
 function updateBadges() {
-  const totalCount = allItems.length;
+  const installedItems = allItems.filter(i => i.status !== 'not-installed' && i.installed !== false);
+  const totalCount = installedItems.length;
   const updatesCount = allItems.filter(i => i.status === 'update-available').length;
-  const appsCount = allItems.filter(i => i.category === 'app').length;
-  const clisCount = allItems.filter(i => i.category === 'cli').length;
-  const reposCount = allItems.filter(i => i.category === 'repo').length;
-  const runtimesCount = allItems.filter(i => i.category === 'runtime' || i.category === 'library').length;
+  const discoverCount = allItems.filter(i => i.status === 'not-installed' || i.installed === false).length;
+  const appsCount = installedItems.filter(i => i.category === 'app').length;
+  const clisCount = installedItems.filter(i => i.category === 'cli').length;
+  const reposCount = installedItems.filter(i => i.category === 'repo').length;
+  const runtimesCount = installedItems.filter(i => i.category === 'runtime' || i.category === 'library').length;
 
   document.getElementById('badge-total').textContent = totalCount;
   document.getElementById('badge-updates').textContent = updatesCount;
   document.getElementById('badge-available').textContent = updatesCount;
+  document.getElementById('badge-discover').textContent = discoverCount;
   document.getElementById('badge-apps').textContent = appsCount;
   document.getElementById('badge-clis').textContent = clisCount;
   document.getElementById('badge-repos').textContent = reposCount;
@@ -573,29 +619,80 @@ function updateBadges() {
 function updateBottomBar() {
   const updatesCount = allItems.filter(i => i.status === 'update-available').length;
   const missingCount = allItems.filter(i => i.status === 'not-installed').length;
-  const selectedCount = allItems.filter(i => i.selected).length;
-  bottomStatus.textContent = `${updatesCount} updates · ${missingCount} missing · ${selectedCount} selected`;
+  const selectedCount = getFilteredItems().filter(i => i.selected).length;
+  bottomStatus.textContent = currentView === 'discover-apps'
+    ? `${missingCount} apps to discover · ${selectedCount} selected`
+    : `${updatesCount} updates · ${selectedCount} selected`;
 }
 
 function updateSelectedButton() {
-  const selectedCount = allItems.filter(i => i.selected).length;
+  const selectedCount = getFilteredItems().filter(i => i.selected).length;
   btnUpdateSelected.disabled = selectedCount === 0;
   updateBottomBar();
 }
 
 // Actions
-async function handleCheckUpdates() {
+async function refreshOnLaunch() {
+  btnRefreshApps.disabled = true;
+  btnCheckUpdates.disabled = true;
+  addLog('Refreshing installed apps in the background...');
+
+  try {
+    await reloadAllConfigs(true, false);
+    if (settings.autoCheckOnLaunch !== false) {
+      await handleCheckUpdates({ background: true });
+    }
+    addLog('Background refresh complete');
+  } catch (err) {
+    addLog(`Background refresh error: ${err.message}`);
+  } finally {
+    btnRefreshApps.disabled = false;
+    btnCheckUpdates.disabled = false;
+    updateBadges();
+    renderCurrentView();
+  }
+}
+
+async function handleRefreshApps() {
+  if (isLoadingVisible()) return;
+
+  showLoadingScreen('Refreshing installed apps…');
+  btnRefreshApps.disabled = true;
+  btnCheckUpdates.disabled = true;
+  addLog('Refreshing installed apps...');
+
+  try {
+    await reloadAllConfigs(true);
+    await handleCheckUpdates();
+    addLog('Installed apps refreshed');
+  } catch (err) {
+    addLog(`Refresh error: ${err.message}`);
+  } finally {
+    btnRefreshApps.disabled = false;
+    btnCheckUpdates.disabled = false;
+    hideLoadingScreen();
+    updateBadges();
+    renderCurrentView();
+  }
+}
+
+async function handleCheckUpdates({ background = false } = {}) {
   if (allItems.length === 0) {
     addLog('No items to check');
     return;
   }
 
   const wasLoading = isLoadingVisible();
-  if (!wasLoading) showLoadingScreen('Checking for updates…');
+  if (!background && !wasLoading) showLoadingScreen('Checking for updates…');
 
   const checkableItems = allItems.filter(
     item => item.status !== 'not-installed' && item.installed !== false
   );
+
+  checkableItems.forEach(item => {
+    item.status = 'checking';
+  });
+  renderItemList();
 
   btnCheckUpdates.disabled = true;
   addLog('Checking for updates...');
@@ -603,10 +700,9 @@ async function handleCheckUpdates() {
   try {
     for (let i = 0; i < checkableItems.length; i++) {
       const item = checkableItems[i];
-      setLoadingMessage(`Checking ${item.name} (${i + 1}/${checkableItems.length})…`);
-
-      item.status = 'checking';
-      renderItemList();
+      if (!background) {
+        setLoadingMessage(`Checking ${item.name} (${i + 1}/${checkableItems.length})…`);
+      }
 
       try {
         if (item.type === 'repo') {
@@ -618,15 +714,36 @@ async function handleCheckUpdates() {
           item.message = updateInfo.message;
         } else if (item.type === 'detector' && item.wingetId) {
           const updateInfo = await window.api.checkWingetUpdate(item.wingetId);
-          item.status = updateInfo.hasUpdate ? 'update-available' : 'up-to-date';
-          item.latestVersion = updateInfo.latestVersion;
+          if (updateInfo.installed === false) {
+            if (item.locallyDetected || item.path) {
+              item.installed = true;
+              item.status = 'up-to-date';
+              item.latestVersion = null;
+              item.message = 'Installed locally (not managed by winget)';
+            } else {
+              item.installed = false;
+              item.status = 'not-installed';
+              item.latestVersion = null;
+              item.message = 'This app is not installed on this device';
+            }
+          } else {
+            item.status = updateInfo.hasUpdate ? 'update-available' : 'up-to-date';
+            item.latestVersion = updateInfo.latestVersion;
+          }
         } else if (item.type === 'detector') {
           item.status = 'up-to-date';
           item.message = 'Installed locally (manual updates)';
         } else if (item.type === 'package') {
           const updateInfo = await window.api.checkWingetUpdate(item.id);
-          item.status = updateInfo.hasUpdate ? 'update-available' : 'up-to-date';
-          item.latestVersion = updateInfo.latestVersion;
+          if (updateInfo.installed === false) {
+            item.installed = false;
+            item.status = 'not-installed';
+            item.latestVersion = null;
+            item.message = 'This app is not installed on this device';
+          } else {
+            item.status = updateInfo.hasUpdate ? 'update-available' : 'up-to-date';
+            item.latestVersion = updateInfo.latestVersion;
+          }
         }
       } catch (err) {
         item.status = 'error';
@@ -638,6 +755,8 @@ async function handleCheckUpdates() {
     }
 
     settings.lastCheckDate = new Date().toISOString();
+    settings.detectors = allItems.filter(item => item.type !== 'repo');
+    settings.repositories = allItems.filter(item => item.type === 'repo');
     await window.api.saveSettings(settings);
 
     addLog('Check complete');
@@ -645,20 +764,21 @@ async function handleCheckUpdates() {
     renderCurrentView();
   } finally {
     btnCheckUpdates.disabled = false;
-    if (!wasLoading) hideLoadingScreen();
+    if (!background && !wasLoading) hideLoadingScreen();
   }
 }
 
 async function handleUpdateSelected() {
-  const selected = allItems.filter(i => i.selected);
+  const selected = getFilteredItems().filter(i => i.selected);
 
   if (selected.length === 0) {
     addLog('No items selected');
     return;
   }
 
+  const actionLabel = currentView === 'discover-apps' ? 'Install' : 'Update';
   const confirmed = await window.api.showConfirmDialog(
-    `Update ${selected.length} selected item${selected.length > 1 ? 's' : ''}?`
+    `${actionLabel} ${selected.length} selected item${selected.length > 1 ? 's' : ''}?`
   );
 
   if (!confirmed) return;
@@ -668,6 +788,7 @@ async function handleUpdateSelected() {
 
   for (const item of selected) {
     const index = allItems.indexOf(item);
+    const wasNotInstalled = item.status === 'not-installed' || item.installed === false;
     allItems[index].status = 'updating';
     renderItemList();
 
@@ -675,7 +796,7 @@ async function handleUpdateSelected() {
       let result;
       if (item.type === 'repo') {
         result = await window.api.updateRepo(item.path);
-      } else if (item.status === 'not-installed' && item.wingetId) {
+      } else if (wasNotInstalled && item.wingetId) {
         result = await window.api.installWingetPackage(item.wingetId, item.wingetSource || null);
         if (result.success) {
           item.installed = true;

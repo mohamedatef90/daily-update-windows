@@ -1,80 +1,139 @@
 # Daily Update - Windows Edition
 
-A Windows desktop app (Electron) that detects installed apps, CLIs, runtimes, and git repositories, checks them for updates, and lets you choose what to update or install. It is the Windows port of the Daily Update macOS app, and this repository also contains the macOS Swift sources.
+A native Windows desktop app that detects git repos and winget packages, checks for updates, and lets you choose what to update.
 
 ## Features
 
-- **Known apps and tools:** bundled detectors for Cursor, Codex, Claude, ChatGPT, Warp, Ollama, Visual Studio Code, Claude Code, GitHub CLI, Node.js, npm, pnpm, Yarn, Bun, Python, Go, Flutter, Git, and more (`src/detectors.json`).
-- **Git repository discovery:** recursively scans a root folder for git repositories (default depth 4, configurable from 1 to 10; skips hidden folders and directories such as `node_modules`, `dist`, and `vendor`; does not scan inside a repository once found).
-- **Update checks:** `git fetch` and a commits-behind count for repositories; `winget` for apps and tools that have a known winget package ID.
-- **Selective actions:** check items, then use "Update Selected" (updates, or installs items that are not installed). A confirmation dialog appears before anything runs.
-- **Discover Apps view:** lists known apps that are not installed and can be installed through winget.
-- **Dashboard, category views (Apps, CLIs, Repos, Runtime/Library), Updates Available, and History.**
-- **Settings persistence:** the root folder, application folders, scan depth, and the last scan results are saved locally.
+- **Known apps & tools** — Detects Claude, Cursor, ChatGPT, Codex, Warp, Ollama, and common CLIs/runtimes
+- **Git repository discovery** — Recursively scans a root folder for git repos with configurable depth
+- **Update detection** — Checks git repositories and winget packages for available updates
+- **Winget package management** — Lists and checks installed winget packages
+- **Selective updates** — Checkbox each item and click "Update Selected"
+- **Confirmation dialog** — Never updates automatically; always asks before executing
+- **Settings persistence** — Saves your root folder and scan results locally
 
 ## Requirements
 
-- Windows 10 or 11
-- Node.js and npm
-- Git
-- winget (used for apps and tools that have a winget package ID)
+- **Windows 10/11**
+- **Node.js 18+** (check with `node --version`)
+- **Git** (check with `git --version`)
+- **Winget** (optional, for package management)
 
-## Getting started
+## Quick Start
 
 ```bash
+# Install dependencies
 npm install
+
+# Run the app
 npm start
 ```
 
-On first launch a setup dialog asks for the root folder, application folders, and maximum scan depth. After setup, use the toolbar: Add Item, Refresh installed apps, Check Updates (Ctrl+R), and Update/Install Selected (Ctrl+U). "Select All Updates" and "Deselect All" act on the current view.
+## Setup
 
-### Scripts
+1. **First launch** — Click "Add Item" to open setup
+2. **Scan Apps & Tools** — Detects Claude, Cursor, ChatGPT, Codex, Warp, CLIs, and runtimes
+3. **Scan for Repositories** — Browse to a root folder (e.g. `C:\Users\YourName\Projects`) and scan git repos
+4. **Check updates** — Click "Check Updates"
+5. **Select items** — Check what you want to update
+6. **Update** — Click "Update Selected" and confirm
 
-| Command | Purpose |
-| --- | --- |
-| `npm start` | Run the app with Electron |
-| `npm test` | Run `test/scanner.test.js` (repository scanner tests) |
-| `npm run build` | Unpacked Windows build (`electron-builder --win --dir`) into `dist/` |
-| `npm run package` | Windows NSIS installer (`electron-builder --win`) into `dist/` |
+## Usage
 
-## How updates work
+### Apps & Tools
 
-- **Git repositories:** `git fetch`, then a count of commits behind the upstream branch; updating runs `git pull --ff-only`.
-- **Apps and tools with a winget ID:** `winget upgrade` to update and `winget install` for items that are not installed.
+- **Scan Apps & Tools**: Detects known apps (Cursor, Claude, ChatGPT, etc.), CLIs, and runtimes
+- Appears under the **Apps**, **CLIs**, and **Runtime/Library** sidebar categories
+- Updates use winget when a package ID is known
+
+### Git Repositories
+
+- **Scan for Repositories**: Discovers all git repos under your root folder
+- **Check Updates**: Runs `git fetch` and checks for commits behind origin
+- **Update Selected**: Runs `git pull --ff-only` on checked repos after confirmation
+
+### All Winget Packages
+
+- **Scan All Winget**: Lists every installed winget package (broader than known detectors)
+- **Check Updates** / **Update Selected**: Uses winget upgrade
 
 ## Settings
 
-Saved to `.daily-update-windows\settings.json` in your user profile folder (`src/settings.js`).
+Settings are saved to: `C:\Users\YourName\.daily-update-windows\settings.json`
 
-## Project structure
+Includes:
+- Root folder path
+- Max scan depth
+- Last discovered repositories
+- Last scanned winget packages
+
+## Repository Scanner Behavior
+
+- **Max depth**: Default 4, configurable 1-10
+- **Skipped directories**: `node_modules`, `.git`, `.build`, `dist`, `vendor`, `.venv`, `.cache`, and more
+- **Hidden directories**: Skips folders starting with `.`
+- **Git detection**: Looks for `.git` directory; does not scan inside git repos
+
+## Testing
+
+```bash
+# Run tests
+npm test
+```
+
+Tests cover repository scanning logic.
+
+## Building
+
+```bash
+# Create a local build (dist folder, not installed)
+npm run build
+
+# Create a Windows installer
+npm run package
+```
+
+The installer will be created in the `dist` folder.
+
+## Project Structure
 
 ```
 src/
-  main.js          Electron main process and IPC handlers
-  preload.js       IPC bridge
-  renderer.js      UI logic
-  index.html       Main window and setup dialog
-  styles.css       Styles
-  scanner.js       Git repository scanner
-  appScanner.js    Installed-app scanning
-  detectors.js     Detector loading and matching
-  detectors.json   Bundled app, CLI, and runtime detectors
-  updater.js       Git and winget update logic
-  settings.js      Settings persistence
-  pathUtils.js     Path helpers
-test/scanner.test.js
-Assets/            App icons
-Sources/, Package.swift   macOS (SwiftUI) version of the app
+├── main.js         # Electron main process
+├── preload.js      # IPC bridge
+├── renderer.js     # UI logic
+├── index.html      # Main window
+├── styles.css      # Styles
+├── scanner.js      # Repository scanner
+├── updater.js      # Git and winget update logic
+└── settings.js     # Settings persistence
+test/
+└── scanner.test.js # Scanner tests
 ```
 
-`README-WINDOWS.md` and `PORT-SUMMARY.md` hold earlier notes on the Windows port.
+## Differences from macOS Version
+
+The macOS version uses Swift and SwiftUI. This Windows port:
+- Uses **Electron + HTML/CSS/JS** for cross-platform compatibility
+- Replaces `defaults read` (macOS) with **winget** (Windows)
+- Uses Node.js `child_process` instead of Swift `Process`
+- Simplifies UI to essential features for MVP
 
 ## Troubleshooting
 
-- **Git operations fail:** install Git and make sure `git --version` works in a terminal.
-- **winget updates or installs fail:** install winget (App Installer from the Microsoft Store on Windows 10) and make sure `winget --version` works.
-- **No repositories found:** check that the root folder contains git repositories, raise the maximum scan depth, and make sure the repositories are not under a skipped directory.
+**"Git is not available"**
+- Ensure Git is installed and in your PATH
+- Run `git --version` in a terminal to verify
+
+**"Winget is not available"**
+- Winget comes with Windows 11 by default
+- Windows 10 users: Install from Microsoft Store (App Installer)
+
+**"No repositories found"**
+- Verify your root folder contains git repos
+- Increase max depth if repos are nested deeper
+- Check that repo directories aren't in the skip list
 
 ## License
 
-MIT, as declared in `package.json`. The repository has no separate LICENSE file.
+MIT
